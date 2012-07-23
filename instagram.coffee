@@ -2,7 +2,7 @@ request = require 'request'
 
 exports.setCredentials = (credentials) ->
     exports.credentials = credentials
-    console.log '* Instagram credentials set as', credentials
+    #console.log '* Instagram credentials set as', credentials
 
 exports.getAuthURL = ->
     "https://api.instagram.com/oauth/authorize/?client_id="     + exports.credentials.client_id + "&redirect_uri=" + exports.credentials.callback_uri + "&response_type=code"
@@ -16,8 +16,12 @@ exports.getSubscriptionListURL = ->
 exports.getGeographyMediaRequest = (geographyID) ->
     "https://api.instagram.com/v1/geographies/" + geographyID + "/media/recent?client_id=" + exports.credentials.client_id
 
+exports.getTagMediaRequest = (tagName) ->
+    "https://api.instagram.com/v1/tags/" + tagName + "/media/recent?client_id=" + exports.credentials.client_id
+  
 exports.listSubscriptions = (callback) ->
   requestObj = {
+    method: 'GET',
     url: exports.getSubscriptionListURL
   }
   request requestObj, (error, response, body) ->
@@ -41,7 +45,7 @@ exports.buildGeographySubscription = (builder, subscriptionCallback) ->
       'lat': builder.lat,
       'lng': builder.lng,
       'radius': builder.radius,
-      'callback_url': exports.credentials.callback_url + builder.streamID, #todo: get this out of hardcoding
+      'callback_url': exports.credentials.callback_url + '/notify/' + builder.streamID #todo: get this out of hardcoding
     }
   }
   console.log requestObj
@@ -65,7 +69,7 @@ exports.buildTagSubscription = (builder, subscriptionCallback) ->
         'object': 'tag',
         'aspect': 'media', 
         'object_id': builder.tag
-        'callback_url': exports.credentials.callback_url + "/notify" + builder.streamID, #todo: get this out of hardcoding
+        'callback_url': exports.credentials.callback_url + "/notify/" + builder.streamID, #todo: get this out of hardcoding
       }
     }
     request requestObj, (error, response, body) ->
@@ -74,15 +78,32 @@ exports.buildTagSubscription = (builder, subscriptionCallback) ->
       else
         subscriptionCallback '- error with buildTagSubscription', null
 
+exports.getTagMedia = (tagName, callback) ->
+  console.log 'getTagMedia lookup up', tagName
+  requestObj = {
+    url: exports.getTagMediaRequest tagName
+  }
+  request requestObj, (error, response, body) ->
+    if not error and response.statusCode is 200 #todo: does this need to be more robust?
+      body = JSON.parse body
+      objects = body.data
+      lastObject = objects.pop() #TODO! check if there's more than one new thing. 
+      callback null, lastObject #err, data
+    else 
+      body = JSON.parse body
+      callback body, null #err, data
 
 
-getMedia = (geographyID, callback) ->
-  console.log 'getMedia lookup up', geographyID
+exports.getGeoMedia = (geographyID, callback) ->
+  #console.log 'getGeoMedia lookup up', geographyID
   requestObj = {
     url: exports.getGeographyMediaRequest geographyID
   }
   request requestObj, (error, response, body) ->
     if not error and response.statusCode is 200 #todo: does this need to be more robust?
-      callback null, body #err, data
+      body = JSON.parse body
+      objects = body.data
+      lastObject = objects.pop #TODO! check if there's more than one new thing. 
+      callback null, lastObject #err, data 
     else 
       callback body, null #err, data

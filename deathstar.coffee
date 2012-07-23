@@ -8,7 +8,7 @@ instagram = require './instagram'
 instagram.setCredentials(credentials.instagram)
 
 app = express.createServer()
-server = app.listen 11000 #todo: move to env
+server = app.listen 6767 #todo: move to env
 io = require('socket.io').listen server
 io.set 'log level', 1
 
@@ -45,12 +45,27 @@ app.all '/notify/:id', (req, res) -> # receives the real-time notification from 
     notifications = req.body
     console.log '* Notification for', req.params.id, '. Had', notifications.length, 'item(s).'
     for notification in notifications
-      getMedia notification.object_id, (err, data) ->
-        #res.send data #todo: this will break if notifcations.length > 1. it rarely is. so it probably wont happen, but it should append and send once.
-        # TODO: Do some cleanup here. Minimize data to send. Date formatter? 
-        # TODO: Add to the database? 
-        # Here we go:
-        pushNewItem {'type': 'instagram', 'data': data} # MOVE THE ITEM INTO THE FUNNEL
+      console.log notification
+      
+      if notification.object is "tag"
+      
+        instagram.getTagMedia notification.object_id, (err, data) ->
+          #res.send data #todo: this will break if notifcations.length > 1. it rarely is. so it probably wont happen, but it should append and send once.
+          # TODO: Do some cleanup here. Minimize data to send. Date formatter? 
+          # TODO: Add to the database? 
+          # Here we go:
+          pushNewItem {'type': 'instagram', 'object': 'tag', 'data': data} # MOVE THE ITEM INTO THE FUNNEL
+  
+      else if notification.object is "geography"
+        instagram.getGeoMedia notification.object_id, (err, data) ->
+          #res.send data #todo: this will break if notifcations.length > 1. it rarely is. so it probably wont happen, but it should append and send once.
+          # TODO: Do some cleanup here. Minimize data to send. Date formatter? 
+          # TODO: Add to the database? 
+          # Here we go:
+          pushNewItem {'type': 'instagram', 'object': 'geo', 'data': data} # MOVE THE ITEM INTO THE FUNNEL
+  
+      else 
+        console.log "notification object type is unknown:", notification.object
   
 app.get '/delete/:subscriptionID', (req, res) -> #todo: move this to the instagram module
   console.log '! Got delete request for', req.params.subscriptionID
@@ -67,7 +82,7 @@ app.get '/delete/:subscriptionID', (req, res) -> #todo: move this to the instagr
 
 app.get '/listInstagram', (req, res) -> #list instagram subscriptions
   instagram.listSubscriptions (subscriptions) ->
-    console.log JSON.stringify subscriptions
+    res.send subscriptions
       
 app.get '/build_instagram_geo', (req, res) ->
   buildObj = {  
@@ -95,4 +110,4 @@ app.get '/build_instagram_tag', (req, res) ->
 
 #socket io stuff
 io.sockets.on 'connection', (socket) ->
-  console.log 'socket connection'
+  console.log 'Socket connection!'
