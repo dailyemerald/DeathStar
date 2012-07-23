@@ -22,10 +22,13 @@ app.configure ->
   app.use express.methodOverride()
   app.use express.errorHandler({showStack: true, dumpExceptions: true})
 
+strencode = (data) ->
+    unescape( encodeURIComponent( JSON.stringify( data ) ) )
 
 #THE NOZZLE OF THE FUNNEL
 pushNewItem = (item) ->
-  console.log '> Dummy: push', item, 'to all the websocket clients.'
+  console.log '> Push', item.data.id, 'to', io.sockets.length, 'websocket clients.'
+  io.sockets.emit 'newItem', strencode item 
 
 ###
   ROUTES
@@ -43,12 +46,11 @@ app.all '/notify/:id', (req, res) -> # receives the real-time notification from 
       
     # If we get here, we have a picture, not a confirmation for a new subscription    
     notifications = req.body
-    console.log '* Notification for', req.params.id, '. Had', notifications.length, 'item(s).'
+    console.log '* Notification for', req.params.id, '. Had', notifications.length, 'item(s). Subscription ID:', req.body[0].subscription_id
     for notification in notifications
-      console.log notification
+      #console.log notification
       
       if notification.object is "tag"
-      
         instagram.getTagMedia notification.object_id, (err, data) ->
           #res.send data #todo: this will break if notifcations.length > 1. it rarely is. so it probably wont happen, but it should append and send once.
           # TODO: Do some cleanup here. Minimize data to send. Date formatter? 

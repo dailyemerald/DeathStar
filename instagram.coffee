@@ -79,16 +79,20 @@ exports.buildTagSubscription = (builder, subscriptionCallback) ->
         subscriptionCallback '- error with buildTagSubscription', null
 
 exports.getTagMedia = (tagName, callback) ->
-  console.log 'getTagMedia lookup up', tagName
+  #console.log 'getTagMedia lookup up', tagName
   requestObj = {
     url: exports.getTagMediaRequest tagName
   }
   request requestObj, (error, response, body) ->
     if not error and response.statusCode is 200 #todo: does this need to be more robust?
-      body = JSON.parse body
-      objects = body.data
-      lastObject = objects.pop() #TODO! check if there's more than one new thing. 
-      callback null, lastObject #err, data
+      try 
+        body = JSON.parse body
+        objects = body.data
+        lastObject = objects.pop() #TODO! check if there's more than one new thing. 
+        callback null, lastObject #err, data
+      catch error
+        callback error, null
+        
     else 
       body = JSON.parse body
       callback body, null #err, data
