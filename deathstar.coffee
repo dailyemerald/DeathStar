@@ -4,13 +4,14 @@ fs = require 'fs'
 request = require 'request'
 credentials = require './credentials'
 instagram = require './instagram'
+twitter = require './twitter'
 
-instagram.setCredentials(credentials.instagram)
+instagram.setCredentials(credentials.instagram) #this could be done in instagram module...
 
 app = express.createServer()
 server = app.listen 6767 #todo: move to env
 io = require('socket.io').listen server
-io.set 'log level', 1
+io.set 'log level', 2
 
 app.configure ->
   app.set 'views', __dirname + '/views'
@@ -33,6 +34,12 @@ pushNewItem = (item) ->
 ###
   ROUTES
 ###
+
+twitter.pullList (listIDs) ->
+  console.log '+ Twitter is rolling. List IDs:', listIDs
+  twitter.startStream listIDs, (newTweet) ->
+    console.log newTweet
+  
 
 app.get '/', (req, res) -> # Not public facing. Just a funnel.
   res.send "This is not the webpage you are looking for."
@@ -68,11 +75,12 @@ app.all '/notify/:id', (req, res) -> # receives the real-time notification from 
   
       else 
         console.log "notification object type is unknown:", notification.object
-  
+
+###  
 app.get '/delete/:subscriptionID', (req, res) -> #todo: move this to the instagram module
   console.log '! Got delete request for', req.params.subscriptionID
   requestObj = {
-    url: instagram.getDeleteURL
+    url: instagram.getDeleteURL(req.params.subscriptionID),
     method: 'DELETE'
   }
   request requestObj, (error, response, body) ->    
@@ -81,9 +89,12 @@ app.get '/delete/:subscriptionID', (req, res) -> #todo: move this to the instagr
       res.send body
     else 
       res.send body
+###
 
 app.get '/listInstagram', (req, res) -> #list instagram subscriptions
+  console.log 'get listInstagram'
   instagram.listSubscriptions (subscriptions) ->
+    console.log 'listSubscriptions callback'
     res.send subscriptions
       
 app.get '/build_instagram_geo', (req, res) ->
@@ -101,7 +112,7 @@ app.get '/build_instagram_geo', (req, res) ->
 
 app.get '/build_instagram_tag', (req, res) ->
   buildObj = {  
-    tag: 'love', 
+    tag: 'oregonfootball', 
     streamID: 'love_tag'
   }
   instagram.buildTagSubscription buildObj, (err, data) -> #4km around UO campus

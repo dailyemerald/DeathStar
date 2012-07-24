@@ -8,7 +8,7 @@ exports.getAuthURL = ->
     "https://api.instagram.com/oauth/authorize/?client_id="     + exports.credentials.client_id + "&redirect_uri=" + exports.credentials.callback_uri + "&response_type=code"
 
 exports.getDeleteURL = (subscriptionID) ->
-    "https://api.instagram.com/v1/subscriptions?client_secret=" + exports.credentials.client_secret + "&id=" + subscriptionID + "&client_id=" + exports.credentials.client_id
+    return "https://api.instagram.com/v1/subscriptions?client_secret=" + exports.credentials.client_secret + "&id=" + subscriptionID + "&client_id=" + exports.credentials.client_id
 
 exports.getSubscriptionListURL = ->
     "https://api.instagram.com/v1/subscriptions?client_secret=" + exports.credentials.client_secret + "&client_id=" + exports.credentials.client_id
@@ -21,8 +21,7 @@ exports.getTagMediaRequest = (tagName) ->
   
 exports.listSubscriptions = (callback) ->
   requestObj = {
-    method: 'GET',
-    url: exports.getSubscriptionListURL
+    url: "https://api.instagram.com/v1/subscriptions?client_secret=" + exports.credentials.client_secret + "&client_id=" + exports.credentials.client_id
   }
   request requestObj, (error, response, body) ->
     callback JSON.parse body
@@ -103,11 +102,15 @@ exports.getGeoMedia = (geographyID, callback) ->
   requestObj = {
     url: exports.getGeographyMediaRequest geographyID
   }
-  request requestObj, (error, response, body) ->
-    if not error and response.statusCode is 200 #todo: does this need to be more robust?
-      body = JSON.parse body
-      objects = body.data
-      lastObject = objects.pop #TODO! check if there's more than one new thing. 
-      callback null, lastObject #err, data 
-    else 
-      callback body, null #err, data
+  request requestObj, (error, response, body) -> 
+    try
+      if not error and response.statusCode is 200 #todo: does this need to be more robust? 
+        body = JSON.parse body
+        objects = body.data
+        lastObject = objects.pop #TODO! check if there's more than one new thing. 
+        callback null, lastObject #err, data 
+      else 
+        callback body, null #err, data
+        
+    catch error
+      callback error, null
