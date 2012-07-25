@@ -78,23 +78,26 @@ exports.buildTagSubscription = (builder, subscriptionCallback) ->
         subscriptionCallback '- error with buildTagSubscription', null
 
 exports.getTagMedia = (tagName, callback) ->
+  console.log 'getTagMedia called'
   #console.log 'getTagMedia lookup up', tagName
   requestObj = {
     url: exports.getTagMediaRequest tagName
   }
   request requestObj, (error, response, body) ->
-    if not error and response.statusCode is 200 #todo: does this need to be more robust?
+    console.log error, response.statusCode, typeof response.statusCode is 200
+    if response.statusCode is 200 #todo: does this need to be more robust?
       try 
         body = JSON.parse body
         objects = body.data
         lastObject = objects.pop() #TODO! check if there's more than one new thing. 
+        console.log lastObject, 'lastObject'
         callback null, lastObject #err, data
       catch error
         callback error, null
         
     else 
-      body = JSON.parse body
-      callback body, null #err, data
+      console.log "ERRORZZZ", response.statusCode
+      callback error, null #err, data
 
 
 exports.getGeoMedia = (geographyID, callback) ->
@@ -103,11 +106,13 @@ exports.getGeoMedia = (geographyID, callback) ->
     url: exports.getGeographyMediaRequest geographyID
   }
   request requestObj, (error, response, body) -> 
+    #console.log error, response.statusCode, typeof response.statusCode is 200
     try
       if not error and response.statusCode is 200 #todo: does this need to be more robust? 
         body = JSON.parse body
         objects = body.data
-        lastObject = objects.pop #TODO! check if there's more than one new thing. 
+        lastObject = objects.pop() #TODO! check if there's more than one new thing. 
+        #console.log 'lastObject', lastObject
         callback null, lastObject #err, data 
       else 
         callback body, null #err, data

@@ -23,14 +23,29 @@ app.configure ->
   app.use express.methodOverride()
   app.use express.errorHandler({showStack: true, dumpExceptions: true})
 
+sentIDs = []
+instagramCounter = 0
+twitterCounter = 0
+
 strencode = (data) ->
     unescape( encodeURIComponent( JSON.stringify( data ) ) )
 
+reportCounters = ->
+  console.log 'instagram:', instagramCounter, "\ttwitter:", twitterCounter
+  instagramCounter = 0
+  twitterCounter = 0
+setInterval reportCounters, 10000
+
 #THE NOZZLE OF THE FUNNEL
 pushNewItem = (item) ->
-  console.log '> Push', item.data.id, 'to', io.sockets.length, 'websocket clients.'
   io.sockets.emit 'newItem', strencode item 
 
+  if item.type is 'instagram'
+      instagramCounter++
+      
+  if item.type is 'twitter'
+    twitterCounter++
+    console.log 'in pushnewitem, have tweet:', item.text, 'from', item.user.name
 ###
   ROUTES
 ###
@@ -38,9 +53,14 @@ pushNewItem = (item) ->
 twitter.pullList (listIDs) ->
   console.log '+ Twitter is rolling. List IDs:', listIDs
   twitter.startStream listIDs, (newTweet) ->
-    console.log newTweet
+    cleanTweet = {
+      thumbnail: newTweet.user.profile_image_url,
+      title: newTweet.user.name,
+      content: newTweet.text,
+      time: newTweet.created_at
+    }
+    pushNewItem {'type': 'twitter', 'object': '', 'data': cleanTweet}
   
-
 app.get '/', (req, res) -> # Not public facing. Just a funnel.
   res.send "This is not the webpage you are looking for."
 
@@ -53,17 +73,19 @@ app.all '/notify/:id', (req, res) -> # receives the real-time notification from 
       
     # If we get here, we have a picture, not a confirmation for a new subscription    
     notifications = req.body
-    console.log '* Notification for', req.params.id, '. Had', notifications.length, 'item(s). Subscription ID:', req.body[0].subscription_id
+    #console.log '* Notification for', req.params.id, '. Had', notifications.length, 'item(s). Subscription ID:', req.body[0].subscription_id
     for notification in notifications
-      #console.log notification
-      
+
       if notification.object is "tag"
         instagram.getTagMedia notification.object_id, (err, data) ->
           #res.send data #todo: this will break if notifcations.length > 1. it rarely is. so it probably wont happen, but it should append and send once.
           # TODO: Do some cleanup here. Minimize data to send. Date formatter? 
           # TODO: Add to the database? 
           # Here we go:
-          pushNewItem {'type': 'instagram', 'object': 'tag', 'data': data} # MOVE THE ITEM INTO THE FUNNEL
+          if data?
+            pushNewItem {'type': 'instagram', 'object': 'tag', 'data': data} # MOVE THE ITEM INTO THE FUNNEL
+          else 
+            console.log 'in tag notification, no data!'
   
       else if notification.object is "geography"
         instagram.getGeoMedia notification.object_id, (err, data) ->
@@ -75,8 +97,10 @@ app.all '/notify/:id', (req, res) -> # receives the real-time notification from 
   
       else 
         console.log "notification object type is unknown:", notification.object
-
-###  
+     
+      
+      #pushNewItem {'type': 'instagram', 'object': 'tag', 'data': notification} # MOVE THE ITEM INTO THE FUNNEL
+ 
 app.get '/delete/:subscriptionID', (req, res) -> #todo: move this to the instagram module
   console.log '! Got delete request for', req.params.subscriptionID
   requestObj = {
@@ -84,12 +108,7 @@ app.get '/delete/:subscriptionID', (req, res) -> #todo: move this to the instagr
     method: 'DELETE'
   }
   request requestObj, (error, response, body) ->    
-    body = JSON.parse body
-    if body.meta.code is 200
-      res.send body
-    else 
-      res.send body
-###
+    res.send body
 
 app.get '/listInstagram', (req, res) -> #list instagram subscriptions
   console.log 'get listInstagram'
@@ -102,18 +121,28 @@ app.get '/build_instagram_geo', (req, res) ->
     lat: '44.058263', # this lat/lng is centered at Autzen
     lng:'-123.068483', 
     radius: '4000', # in meters
-    streamID: 'uo_geo'
+    streamID: 'geo'
   }
   instagram.buildGeographySubscription buildObj, (err, data) -> 
-    if err?
-      res.send 'err', err
-    else
-      res.send 'yay', data
+    res.send err+'\n\n'+data
+
+
+app.get '/igportland', (req, res) ->
+  buildObj = {  
+    lat: "45.52345",
+    lng: "-122.675915",
+    radius: "5000",
+    streamID: 'portland'
+  }
+  instagram.buildGeographySubscription buildObj, (err, data) -> 
+    res.send err+'\n\n'+data
+
+
 
 app.get '/build_instagram_tag', (req, res) ->
   buildObj = {  
-    tag: 'oregonfootball', 
-    streamID: 'love_tag'
+    tag: 'love', 
+    streamID: 'love'
   }
   instagram.buildTagSubscription buildObj, (err, data) -> #4km around UO campus
     if err?
