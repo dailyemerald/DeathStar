@@ -52,14 +52,19 @@ pushNewItem = (item) ->
 
 twitter.pullList (listIDs) ->
   console.log '+ Twitter is rolling. List IDs:', listIDs
-  twitter.startStream listIDs, (newTweet) ->
+  setupData = {
+    track: ['goducks', 'ducksgameday', 'odesports'],
+    follow: listIDs,
+    location: [44.053591,-123.077431,44.061663,-123.059353]
+  }
+  twitter.startStream setupData, (newTweet) ->
     cleanTweet = {
       thumbnail: newTweet.user.profile_image_url,
       title: newTweet.user.name,
       content: newTweet.text,
       time: newTweet.created_at
     }
-    pushNewItem {'type': 'twitter', 'object': '', 'data': cleanTweet}
+    pushNewItem {'type': 'twitter', 'object': null, 'data': cleanTweet}
   
 app.get '/', (req, res) -> # Not public facing. Just a funnel.
   res.send "This is not the webpage you are looking for."
@@ -137,7 +142,15 @@ app.get '/igportland', (req, res) ->
   instagram.buildGeographySubscription buildObj, (err, data) -> 
     res.send err+'\n\n'+data
 
-
+app.get '/sf', (req, res) ->
+  buildObj = {  
+    lat: "37.758158",
+    lng: "-122.4133",
+    radius: "5000",
+    streamID: 'sf'
+  }
+  instagram.buildGeographySubscription buildObj, (err, data) -> 
+    res.send err+'\n\n'+data
 
 app.get '/build_instagram_tag', (req, res) ->
   buildObj = {  
