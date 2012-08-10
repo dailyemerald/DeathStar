@@ -2,11 +2,9 @@ express = require 'express'
 http = require 'http'
 fs = require 'fs'
 request = require 'request'
-credentials = require './credentials'
+
 instagram = require './instagram'
 twitter = require './twitter'
-
-instagram.setCredentials(credentials.instagram) #this could be done in instagram module...
 
 app = express.createServer()
 server = app.listen 6767 #todo: move to env
@@ -54,10 +52,11 @@ twitter.pullList (listIDs) ->
   console.log '+ Twitter is rolling. List IDs:', listIDs
   setupData = {
     track: ['goducks', 'ducksgameday', 'odesports'],
-    follow: listIDs,
-    location: [44.053591,-123.077431,44.061663,-123.059353]
+    follow: listIDs#,
+    #location: [44.053591,-123.077431,44.061663,-123.059353]
   }
-  twitter.startStream setupData, (newTweet) ->
+  twitter.buildStream setupData, (newTweet) ->
+    console.log 'buildStream in deathstar.coffee got a tweet', newTweet
     cleanTweet = {
       thumbnail: newTweet.user.profile_image_url,
       title: newTweet.user.name,
@@ -67,7 +66,7 @@ twitter.pullList (listIDs) ->
     pushNewItem {'type': 'twitter', 'object': null, 'data': cleanTweet}
   
 app.get '/', (req, res) -> # Not public facing. Just a funnel.
-  res.send "This is not the webpage you are looking for."
+  res.send ''
 
 # Instagram POSTs here for new media.
 app.all '/notify/:id', (req, res) -> # receives the real-time notification from IG
@@ -121,12 +120,12 @@ app.get '/listInstagram', (req, res) -> #list instagram subscriptions
     console.log 'listSubscriptions callback'
     res.send subscriptions
       
-app.get '/build_instagram_geo', (req, res) ->
+app.get '/geo_goducks', (req, res) ->
   buildObj = {  
     lat: '44.058263', # this lat/lng is centered at Autzen
     lng:'-123.068483', 
     radius: '4000', # in meters
-    streamID: 'geo'
+    streamID: 'geo_goducks'
   }
   instagram.buildGeographySubscription buildObj, (err, data) -> 
     res.send err+'\n\n'+data
@@ -152,10 +151,10 @@ app.get '/sf', (req, res) ->
   instagram.buildGeographySubscription buildObj, (err, data) -> 
     res.send err+'\n\n'+data
 
-app.get '/build_instagram_tag', (req, res) ->
+app.get '/tag_goducks', (req, res) ->
   buildObj = {  
-    tag: 'love', 
-    streamID: 'love'
+    tag: 'goducks', 
+    streamID: 'tag_goducks'
   }
   instagram.buildTagSubscription buildObj, (err, data) -> #4km around UO campus
     if err?

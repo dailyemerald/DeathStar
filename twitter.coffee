@@ -26,7 +26,7 @@ exports.buildStream = (trackTheseThings, newTweetCallback) ->
   twitter.filter trackTheseThings, (stream) ->
     
     stream.on 'tweet', (data) ->
-      console.log 'new tweet', data
+      #console.log 'new tweet', data
       newTweetCallback data
     
     stream.on 'delete', (data) ->
