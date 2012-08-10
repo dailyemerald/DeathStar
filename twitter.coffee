@@ -3,25 +3,38 @@ TwitterLib = require 'tuiter'
 
 credentials = require './credentials'
 
-exports.twitter = new TwitterLib({
+twitter = new TwitterLib({
   consumer_key: credentials.twitter.consumer_key,
   consumer_secret: credentials.twitter.consumer_secret,
-  access_token: credentials.twitter.access_token_key,
+  access_token_key: credentials.twitter.access_token_key,
   access_token_secret: credentials.twitter.access_token_secret
  });
-
+ 
+ 
 exports.pullList = (callback) ->
-  exports.twitter.get 'lists/members', {'slug':'football-players', 'owner_screen_name':'dailyemerald', 'cursor':'-1'}, (err, reply) ->
+  twitter.listMembers {'slug':'football-players', 'owner_screen_name':'dailyemerald', 'cursor':'-1'}, (err, reply) ->
     listIDs = []
     if err is null
       for user in reply.users
         listIDs.push user.id
     callback listIDs
 
-exports.startStream = (setupData, newTweetCallback)->
+exports.buildStream = (trackTheseThings, newTweetCallback) ->
   #stream = exports.twitter.stream 'statuses/filter', { track:["USWNT", "goducks","love", "dailyemerald"], follow: followIDs, locations:[44.053591,-123.077431,44.061663,-123.059353] }
-  stream = exports.twitter.stream 'statuses/filter', { track:setupData.track, follow: setupData.follow, location:setupData.location }
   console.log 'startStream spinning up Twitter Streaming API...'
-  stream.on 'tweet', (data) ->
-    newTweetCallback data
+  
+  twitter.filter trackTheseThings, (stream) ->
+    
+    stream.on 'tweet', (data) ->
+      console.log 'new tweet', data
+      newTweetCallback data
+    
+    stream.on 'delete', (data) ->
+      console.log 'delete!', data
+      
+    stream.on 'error', (data) ->
+      console.log 'error!', data
+
+exports.doSearch = (trackTheseThings, callback) ->
+  console.log 'doSearch not implemented'
   
