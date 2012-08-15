@@ -2,6 +2,10 @@ express = require 'express'
 http = require 'http'
 fs = require 'fs'
 request = require 'request'
+_ = require 'underscore'
+repl = require 'repl'
+net = require 'net'
+fs = require 'fs'
 
 instagram = require './instagram'
 twitter = require './twitter'
@@ -21,21 +25,76 @@ app.configure ->
   app.use express.methodOverride()
   app.use express.errorHandler({showStack: true, dumpExceptions: true})
 
+root = this
+replPath = "/tmp/repl-app-deathstar"
+fs.unlinkSync replPath #otherwise it's... in use? won't reconnect?
+replNet = net.createServer (socket) ->
+  r = repl.start({prompt: "deathstar> ", input: socket, output: socket, terminal: true, useGlobal: true})
+          .on 'exit', ->
+            socket.end()
+  #r.context.io = io
+  r.context = root
+replNet.listen replPath
+
+
+###################
+
+fakedb = []
+db_name = 'db.json'
+
+restoredb = ->
+  fakedb = JSON.parse fs.readFileSync db_name
+  console.log '+ Restored', fakedb.length, 'entries from file.'
+
+dbsortfunc = (item) ->
+     return 1 * item.time
+
+syncdb = ->
+  starttime = new Date()
+  while fakedb.length > 50
+    discardeditem = fakedb.shift()
+    console.log 'discarded item'
+  try  
+    sorteddb = _.sortBy fakedb, dbsortfunc
+    stringdb = JSON.stringify sorteddb
+    fs.writeFileSync db_name, stringdb
+    console.log '+ Synced to disk in', new Date() - starttime, 'milliseconds for', stringdb.length, 'characters.'
+  catch error
+    console.log 'Error while syncing to disk!', error
+setInterval syncdb, 10*1000 #sync to disk every XX seconds
+
+# this runs only on startup to restore state.
+if fakedb.length is 0
+  console.log '! Restoring db...'
+  restoredb()
+
+
+
+###################
+
 sentIDs = []
 instagramCounter = 0
 twitterCounter = 0
+
+###################
 
 strencode = (data) ->
     unescape( encodeURIComponent( JSON.stringify( data ) ) )
 
 reportCounters = ->
-  console.log 'instagram:', instagramCounter, "\ttwitter:", twitterCounter
+  console.log 'instagram:', instagramCounter, "\ttwitter:", twitterCounter, '\tcurrentClients', Object.keys(io.connected).length # TODO: push this data to graphite/statsd here?
   instagramCounter = 0
   twitterCounter = 0
+  
 setInterval reportCounters, 10000
+
+app.get '/connected_clients', (req, res) ->
+  res.send Object.keys(io.connected).length
 
 #THE NOZZLE OF THE FUNNEL
 pushNewItem = (item) ->
+  
+  fakedb.push item # add to in-mem database that is synced to disk sometimes for a restore
   io.sockets.emit 'newItem', strencode item 
 
   if item.type is 'instagram'
@@ -43,11 +102,12 @@ pushNewItem = (item) ->
       
   if item.type is 'twitter'
     twitterCounter++
-    console.log 'in pushnewitem, have tweet:', item.text, 'from', item.user.name
+    
 ###
   ROUTES
 ###
 
+# this pulls the twitter list, then builds the Streaming API connection
 twitter.pullList (listIDs) ->
   console.log '+ Twitter is rolling. List IDs:', listIDs
   setupData = {
@@ -61,12 +121,31 @@ twitter.pullList (listIDs) ->
       thumbnail: newTweet.user.profile_image_url,
       title: newTweet.user.name,
       content: newTweet.text,
-      time: newTweet.created_at
+      time: newTweet.created_at_iso
     }
     pushNewItem {'type': 'twitter', 'object': null, 'data': cleanTweet}
   
-app.get '/', (req, res) -> # Not public facing. Just a funnel.
-  res.send ''
+
+
+#socket io stuff
+io.sockets.on 'connection', (socket) ->
+  
+  socket.on 'hello', (clientdata) ->
+    
+    socket.emit 'rebuild', fakedb    
+  
+  
+      
+################# ROUTES ##################
+
+###
+app.get '/rebuildInstagram', (req, res) ->
+  instagram.buildInitalSet (unsortedPhotos) ->
+    timeSort = (item) ->
+       return -1 * item.created_time_int
+    sortedPhotos = _.sortBy unsortedPhotos, timeSort
+    res.json sortedPhotos
+###
 
 # Instagram POSTs here for new media.
 app.all '/notify/:id', (req, res) -> # receives the real-time notification from IG
@@ -87,9 +166,9 @@ app.all '/notify/:id', (req, res) -> # receives the real-time notification from 
           # TODO: Add to the database? 
           # Here we go:
           if data?
-            pushNewItem {'type': 'instagram', 'object': 'tag', 'data': data} # MOVE THE ITEM INTO THE FUNNEL
+            pushNewItem {'type': 'instagram', 'object': 'tag', 'data': data, 'time': data.iso_time} # MOVE THE ITEM INTO THE FUNNEL
           else 
-            console.log 'in tag notification, no data!'
+            console.log 'Instagram: in tag notification, no data!'
   
       else if notification.object is "geography"
         instagram.getGeoMedia notification.object_id, (err, data) ->
@@ -97,32 +176,32 @@ app.all '/notify/:id', (req, res) -> # receives the real-time notification from 
           # TODO: Do some cleanup here. Minimize data to send. Date formatter? 
           # TODO: Add to the database? 
           # Here we go:
-          pushNewItem {'type': 'instagram', 'object': 'geo', 'data': data} # MOVE THE ITEM INTO THE FUNNEL
+          if data?
+            pushNewItem {'type': 'instagram', 'object': 'geo', 'data': data, 'time': data.iso_item} # MOVE THE ITEM INTO THE FUNNEL
+          else 
+            console.log 'Instagram: in geo notification, no data!'
   
       else 
-        console.log "notification object type is unknown:", notification.object
+        console.log "Instagram notification object type is unknown:", notification.object
      
+     res.send 200
       
-      #pushNewItem {'type': 'instagram', 'object': 'tag', 'data': notification} # MOVE THE ITEM INTO THE FUNNEL
- 
 app.get '/delete/:subscriptionID', (req, res) -> #todo: move this to the instagram module
   console.log '! Got delete request for', req.params.subscriptionID
   requestObj = {
-    url: instagram.getDeleteURL(req.params.subscriptionID),
+    url: instagram.getDeleteURL(req.params.subscriptionID), #sanitize?
     method: 'DELETE'
   }
   request requestObj, (error, response, body) ->    
     res.send body
 
 app.get '/listInstagram', (req, res) -> #list instagram subscriptions
-  console.log 'get listInstagram'
   instagram.listSubscriptions (subscriptions) ->
-    console.log 'listSubscriptions callback'
     res.send subscriptions
       
 app.get '/geo_goducks', (req, res) ->
   buildObj = {  
-    lat: '44.058263', # this lat/lng is centered at Autzen
+    lat: '44.058263', # this lat/lng is centered at Autzen (?)
     lng:'-123.068483', 
     radius: '4000', # in meters
     streamID: 'geo_goducks'
@@ -130,38 +209,11 @@ app.get '/geo_goducks', (req, res) ->
   instagram.buildGeographySubscription buildObj, (err, data) -> 
     res.send err+'\n\n'+data
 
-
-app.get '/igportland', (req, res) ->
-  buildObj = {  
-    lat: "45.52345",
-    lng: "-122.675915",
-    radius: "5000",
-    streamID: 'portland'
-  }
-  instagram.buildGeographySubscription buildObj, (err, data) -> 
-    res.send err+'\n\n'+data
-
-app.get '/sf', (req, res) ->
-  buildObj = {  
-    lat: "37.758158",
-    lng: "-122.4133",
-    radius: "5000",
-    streamID: 'sf'
-  }
-  instagram.buildGeographySubscription buildObj, (err, data) -> 
-    res.send err+'\n\n'+data
-
 app.get '/tag_goducks', (req, res) ->
-  buildObj = {  
-    tag: 'goducks', 
-    streamID: 'tag_goducks'
-  }
-  instagram.buildTagSubscription buildObj, (err, data) -> #4km around UO campus
+  buildObj = 
+  instagram.buildTagSubscription {tag:'goducks', streamID:'tag_goducks'}, (err, data) ->
     if err?
-      res.send 'err<br><br>'+err
+      res.send err
     else
-      res.send 'yay<br><br>'+data
-
-#socket io stuff
-io.sockets.on 'connection', (socket) ->
-  console.log 'Socket connection!'
+      res.send data      
+      

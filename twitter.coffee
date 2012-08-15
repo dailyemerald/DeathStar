@@ -27,6 +27,8 @@ exports.buildStream = (trackTheseThings, newTweetCallback) ->
     
     stream.on 'tweet', (data) ->
       #console.log 'new tweet', data
+      data.iso_time = new Date data.created_at
+      data.iso_time = data.iso_time.toISOString()
       newTweetCallback data
     
     stream.on 'delete', (data) ->
@@ -36,5 +38,10 @@ exports.buildStream = (trackTheseThings, newTweetCallback) ->
       console.log 'error!', data
 
 exports.doSearch = (trackTheseThings, callback) ->
+  #TODO: implement
   console.log 'doSearch not implemented'
   
+exports.buildInitalSet = (callback) ->
+  callback [] #TODO: implement
+  
+    

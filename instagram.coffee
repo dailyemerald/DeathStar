@@ -88,15 +88,31 @@ exports.getTagMedia = (tagName, callback) ->
         objects = body.data
         #lastObject = objects.pop() #TODO! check if there's more than one new thing. 
         #console.log lastObject, 'lastObject'
-        callback null, objects #err, data
+        
+        for photo in objects
+          console.log 'igphoto:', photo
+          if photo.id not in exports.alreadySeen
+            exports.alreadySeen.push photo.id
+            photo.iso_time = exports.makeISOtime photo.created_time
+            console.log 'firing callback in tag media for new picture!'
+            callback null, photo #err, data 
+          else
+            console.log 'dupe photo. no callback.'
+            
+        exports.cleanupSeen() #keep the "seen" list to at most 50.
+          
       catch error
         callback error, null
         
     else 
       #console.log "ERRORZZZ", response.statusCode
       callback error, null #err, data
-
-
+      
+exports.alreadySeen = []
+exports.cleanupSeen = ->
+  while exports.alreadySeen.length > 50
+    exports.alreadySeen.shift()
+    
 exports.getGeoMedia = (geographyID, callback) ->
   #console.log 'getGeoMedia lookup up', geographyID
   requestObj = {
@@ -110,14 +126,32 @@ exports.getGeoMedia = (geographyID, callback) ->
         objects = body.data
         #lastObject = objects.pop() #TODO! check if there's more than one new thing. 
         #console.log 'lastObject', lastObject
-        callback null, objects #err, data 
+        
+        for photo in objects
+          if photo.id not in exports.alreadySeen
+            exports.alreadySeen.push photo.id
+            photo.iso_time = exports.makeISOtime photo.created_time
+            console.log 'firing callback in geo media for new picture!'
+            callback null, photo #err, data 
+          else
+            console.log 'dupe photo. no callback.'  
+        exports.cleanupSeen() #keep the "seen" list to at most 50.
+        
       else 
         callback body, null #err, data
         
     catch error
       callback error, null
   
-  
+# seems to work! unix time (seconds, not milliseconds) passed in as STRING
+# returns STRING that is ISO8601
+exports.makeISOtime = (secs) ->
+  isoDate = new Date 1000*parseFloat(secs)
+  isoDate = isoDate.toISOString()
+  #console.log 'makeISOtime got', secs, 'and made', isoDate 
+  return isoDate
+
+
       
 # get the current object set for each subscription 
 # returns an unsorted array of photos     
@@ -143,16 +177,22 @@ exports.buildInitalSet = (callback) ->
 
       if subscription.object is 'geography'  
         exports.getGeoMedia subscription.object_id, (err, photos) ->
+          if err
+            throw err
           for photo in photos
             photo.created_time_int = parseFloat photo.created_time
+            photo.created_time_iso = exports.makeISOtime photo.created_time
             unsortedSeed.push photo
           geoDone = true
           areWeDoneYet()
 
       else if subscription.object is 'tag'
         exports.getTagMedia subscription.object_id, (err, photos) ->
+          if err
+            throw err  
           for photo in photos
             photo.created_time_int = parseFloat photo.created_time
+            photo.created_time_iso = exports.makeISOtime photo.created_time
             unsortedSeed.push photo
           tagDone = true
           areWeDoneYet()
