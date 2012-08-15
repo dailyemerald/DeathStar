@@ -36,6 +36,18 @@ replNet = net.createServer (socket) ->
   r.context = root
 replNet.listen replPath
 
+###################
+
+dgram = require 'dgram'
+statsClient = dgram.createSocket("udp4");
+
+pushStat = (rawmessage) ->
+  console.log 'pushStat got:', rawmessage
+  message = new Buffer rawmessage
+  statsClient.send message, 0, message.length, 8125, "localhost", (err, bytes) ->
+    if err
+      console.log "Error in pushStat:", err
+
 
 ###################
 
@@ -58,9 +70,12 @@ syncdb = ->
     sorteddb = _.sortBy fakedb, dbsortfunc
     stringdb = JSON.stringify sorteddb
     fs.writeFileSync db_name, stringdb
-    console.log '+ Synced to disk in', new Date() - starttime, 'milliseconds for', stringdb.length, 'characters.'
+    synctime = new Date() - starttime
+    pushStat 'dbsync:'+synctime+'|ms'
+    console.log '+ Synced to disk in', synctime, 'milliseconds for', stringdb.length, 'characters.'
   catch error
     console.log 'Error while syncing to disk!', error
+    
 setInterval syncdb, 10*1000 #sync to disk every XX seconds
 
 # this runs only on startup to restore state.
@@ -82,14 +97,23 @@ strencode = (data) ->
     unescape( encodeURIComponent( JSON.stringify( data ) ) )
 
 reportCounters = ->
-  console.log 'instagram:', instagramCounter, "\ttwitter:", twitterCounter, '\tcurrentClients', Object.keys(io.connected).length # TODO: push this data to graphite/statsd here?
+  activeClients = Object.keys(io.connected).length
+  pushStat 'active_clients:'+activeClients+'|g'
+  
+  console.log 'instagram:', instagramCounter, "\ttwitter:", twitterCounter, '\tcurrentClients', activeClients # TODO: push this data to graphite/statsd here?
   instagramCounter = 0
   twitterCounter = 0
   
+  memusage = process.memoryUsage()
+  pushStat 'rss:'+parseInt(memusage.rss/(1024*1024))+"|g"
+  pushStat 'heapTotal:'+parseInt(memusage.heapTotal/(1024*1024))+"|g"
+  pushStat 'heapUsed:'+parseInt(memusage.heapUsed/(1024*1024))+"|g"
+  pushStat 'uptime:'+parseInt(process.uptime())+"|g"
+  
 setInterval reportCounters, 10000
 
-app.get '/connected_clients', (req, res) ->
-  res.send Object.keys(io.connected).length
+#app.get '/connected_clients', (req, res) ->
+#  res.send Object.keys(io.connected).length
 
 #THE NOZZLE OF THE FUNNEL
 pushNewItem = (item) ->
@@ -98,9 +122,11 @@ pushNewItem = (item) ->
   io.sockets.emit 'newItem', strencode item 
 
   if item.type is 'instagram'
+      pushStat 'incoming_instagram:1|c'
       instagramCounter++
       
   if item.type is 'twitter'
+    pushStat 'incoming_tweet:1|c'
     twitterCounter++
     
 ###
@@ -131,7 +157,7 @@ twitter.pullList (listIDs) ->
 io.sockets.on 'connection', (socket) ->
   
   socket.on 'hello', (clientdata) ->
-    
+    pushStat 'socket_hello:1|c'
     socket.emit 'rebuild', fakedb    
   
   
@@ -217,3 +243,8 @@ app.get '/tag_goducks', (req, res) ->
     else
       res.send data      
       
+      
+process.on 'uncaughtException', (err) ->
+  pushStat 'uncaughtException:1|c'
+  console.error 'uncaughtException:', err.message
+  console.error err.stack
