@@ -7,6 +7,11 @@ repl = require 'repl'
 net = require 'net'
 fs = require 'fs'
 
+redis = require 'redis'
+redisClient = redis.createClient()
+redisClient.on "error", (err) ->
+  console.log "Redis Error", err
+
 instagram = require './instagram'
 twitter = require './twitter'
 
@@ -42,48 +47,27 @@ dgram = require 'dgram'
 statsClient = dgram.createSocket("udp4");
 
 pushStat = (rawmessage) ->
-  console.log 'pushStat got:', rawmessage
+  #console.log 'pushStat got:', rawmessage
   message = new Buffer rawmessage
   statsClient.send message, 0, message.length, 8125, "localhost", (err, bytes) ->
     if err
       console.log "Error in pushStat:", err
 
+pushTimingStat = (start, end, name) ->
+  diff = end - start 
+  pushStat name+":"+diff+"|ms"
 
-###################
+gettime = ->
+  return new Date().getTime()
 
-fakedb = []
-db_name = 'db.json'
-
-restoredb = ->
-  fakedb = JSON.parse fs.readFileSync db_name
-  console.log '+ Restored', fakedb.length, 'entries from file.'
-
-dbsortfunc = (item) ->
-     return 1 * item.time
-
-syncdb = ->
-  starttime = new Date()
-  while fakedb.length > 50
-    discardeditem = fakedb.shift()
-    console.log 'discarded item'
-  try  
-    sorteddb = _.sortBy fakedb, dbsortfunc
-    stringdb = JSON.stringify sorteddb
-    fs.writeFileSync db_name, stringdb
-    synctime = new Date() - starttime
-    pushStat 'dbsync:'+synctime+'|ms'
-    console.log '+ Synced to disk in', synctime, 'milliseconds for', stringdb.length, 'characters.'
-  catch error
-    console.log 'Error while syncing to disk!', error
-    
-setInterval syncdb, 10*1000 #sync to disk every XX seconds
-
-# this runs only on startup to restore state.
-if fakedb.length is 0
-  console.log '! Restoring db...'
-  restoredb()
-
-
+getRecentItems = (num, callback) ->
+  start = gettime()
+  redisClient.lrange 'feedl', 0, num, (err, dirtydata) ->
+    cleandata = []
+    for item in dirtydata
+      cleandata.push JSON.parse item
+    pushTimingStat start, gettime(), 'feedl_'+num
+    callback cleandata
 
 ###################
 
@@ -99,11 +83,7 @@ strencode = (data) ->
 reportCounters = ->
   activeClients = Object.keys(io.connected).length
   pushStat 'active_clients:'+activeClients+'|g'
-  
-  console.log 'instagram:', instagramCounter, "\ttwitter:", twitterCounter, '\tcurrentClients', activeClients # TODO: push this data to graphite/statsd here?
-  instagramCounter = 0
-  twitterCounter = 0
-  
+    
   memusage = process.memoryUsage()
   pushStat 'rss:'+parseInt(memusage.rss/(1024*1024))+"|g"
   pushStat 'heapTotal:'+parseInt(memusage.heapTotal/(1024*1024))+"|g"
@@ -112,22 +92,28 @@ reportCounters = ->
   
 setInterval reportCounters, 10000
 
-#app.get '/connected_clients', (req, res) ->
-#  res.send Object.keys(io.connected).length
+app.get '/connected_clients', (req, res) ->
+  res.send Object.keys(io.connected).length
 
 #THE NOZZLE OF THE FUNNEL
 pushNewItem = (item) ->
-  
-  fakedb.push item # add to in-mem database that is synced to disk sometimes for a restore
-  io.sockets.emit 'newItem', strencode item 
+  prepush = gettime()
+  redisClient.incr 'feedl_id', (err, incr_id) ->
+    item.d_id = incr_id
+    redisClient.lpush 'feedl', JSON.stringify(item), (err, reply) ->
+      pushTimingStat prepush, gettime(), 'lpush_feedl'
+      console.log 'pushNewItem', item.type, item.time
+      if err
+        console.log "Redis lpush error:", err
+        pushStat 'redis_lpush_error:100|c'
+      
+  io.sockets.emit 'newItem', strencode item # move this to redis pub/sub on another node instance?
 
   if item.type is 'instagram'
-      pushStat 'incoming_instagram:1|c'
-      instagramCounter++
+    pushStat 'incoming_instagram:1|c'
       
   if item.type is 'twitter'
     pushStat 'incoming_tweet:1|c'
-    twitterCounter++
     
 ###
   ROUTES
@@ -135,21 +121,23 @@ pushNewItem = (item) ->
 
 # this pulls the twitter list, then builds the Streaming API connection
 twitter.pullList (listIDs) ->
-  console.log '+ Twitter is rolling. List IDs:', listIDs
+  console.log '+ Twitter Streaming API is rolling. List IDs:', listIDs
   setupData = {
-    track: ['goducks', 'ducksgameday', 'odesports'],
+    track: ['goducks'],
     follow: listIDs#,
     #location: [44.053591,-123.077431,44.061663,-123.059353]
   }
   twitter.buildStream setupData, (newTweet) ->
-    console.log 'buildStream in deathstar.coffee got a tweet', newTweet
+    #console.log 'buildStream in deathstar.coffee got a tweet', newTweet
     cleanTweet = {
       thumbnail: newTweet.user.profile_image_url,
       title: newTweet.user.name,
       content: newTweet.text,
-      time: newTweet.created_at_iso
+      #id_str: newTweet.id_str,
+      iso_time: newTweet.iso_time
     }
-    pushNewItem {'type': 'twitter', 'object': null, 'data': cleanTweet}
+    #console.log cleanTweet
+    pushNewItem {'type': 'twitter', 'data': cleanTweet, 'time': cleanTweet.iso_time}
   
 
 
@@ -158,9 +146,35 @@ io.sockets.on 'connection', (socket) ->
   
   socket.on 'hello', (clientdata) ->
     pushStat 'socket_hello:1|c'
-    socket.emit 'rebuild', fakedb    
+    #socket.emit 'rebuild', fakedb    
+    getRecentItems 50, (items) ->
+      socket.emit 'rebuild', items
+      
+  socket.on 'receivedNewItem', (clientdata) ->
+    pushStat 'receivedNewItem:1|c'
+   
+  socket.on 'ping', (clientdata) ->
+    socket.emit 'pong', {'time': new Date()}
+    console.log 'ping', clientdata
+
+  socket.on 'pull', (clientdata) ->
+    console.log "socket: got pull."
+    getRecentItems 50, (items) ->
+      socket.emit 'incremental_rebuild', items
+      
+  socket.on 'resume', (clientdata) ->
+    console.log "socket: resume:", clientdata    
+  ###
+  socket.emit 'ping'
+  socket.pingstart = new Date();
   
-  
+  socket.on 'pong', (reply) ->
+    socketdelay = parseInt( socket.pingstart - new Date() )
+    console.log('socketdelay is', socketdelay)
+    pushStat 'socket_delay:'+socketdelay+'|ms'
+    socket.pingstart = null
+    sockekdelay = null
+  ###
       
 ################# ROUTES ##################
 
@@ -203,7 +217,7 @@ app.all '/notify/:id', (req, res) -> # receives the real-time notification from 
           # TODO: Add to the database? 
           # Here we go:
           if data?
-            pushNewItem {'type': 'instagram', 'object': 'geo', 'data': data, 'time': data.iso_item} # MOVE THE ITEM INTO THE FUNNEL
+            pushNewItem {'type': 'instagram', 'object': 'geo', 'data': data, 'time': data.iso_time} # MOVE THE ITEM INTO THE FUNNEL
           else 
             console.log 'Instagram: in geo notification, no data!'
   
@@ -242,7 +256,10 @@ app.get '/tag_goducks', (req, res) ->
       res.send err
     else
       res.send data      
-      
+
+app.get '/recent', (req, res) ->
+  getRecentItems 20, (items) ->
+    res.json items
       
 process.on 'uncaughtException', (err) ->
   pushStat 'uncaughtException:1|c'

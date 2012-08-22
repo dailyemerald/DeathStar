@@ -21,7 +21,7 @@ exports.pullList = (callback) ->
 
 exports.buildStream = (trackTheseThings, newTweetCallback) ->
   #stream = exports.twitter.stream 'statuses/filter', { track:["USWNT", "goducks","love", "dailyemerald"], follow: followIDs, locations:[44.053591,-123.077431,44.061663,-123.059353] }
-  console.log 'startStream spinning up Twitter Streaming API...'
+  #console.log 'startStream spinning up Twitter Streaming API...'
   
   twitter.filter trackTheseThings, (stream) ->
     
@@ -32,10 +32,10 @@ exports.buildStream = (trackTheseThings, newTweetCallback) ->
       newTweetCallback data
     
     stream.on 'delete', (data) ->
-      console.log 'delete!', data
+      console.log 'Twitter: got delete!', data
       
     stream.on 'error', (data) ->
-      console.log 'error!', data
+      console.log 'Twitter: got error', data
 
 exports.doSearch = (trackTheseThings, callback) ->
   #TODO: implement

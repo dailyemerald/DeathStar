@@ -1,5 +1,6 @@
 request = require 'request'
 credentials = require('./credentials').instagram
+redisClient = require('redis').createClient()
 
 exports.getAuthURL = ->
     "https://api.instagram.com/oauth/authorize/?client_id="     + credentials.client_id + "&redirect_uri=" + credentials.callback_uri + "&response_type=code"
@@ -74,87 +75,75 @@ exports.buildTagSubscription = (builder, subscriptionCallback) ->
       else
         subscriptionCallback '- error with buildTagSubscription', null
 
+
+# the guts are below #
+
+#body is the raw, json encoded pack from the lookup... after the POST. 
+#use a redis hash to keep track of what we've already seen
+#could also do a sort based on created time... or a timediff threshold (server time sync issues with that?)
+
+exports.checkAndProcessPhoto = (photo, callback) -> #callback is actually the function passed from who called getTagMedia. yikes.
+  hash_key = "known_instagram_photos"
+  redisClient.hexists hash_key, photo.id, (err, reply) ->
+    #console.log 'hexists returned: err:', err, "reply:", reply, reply+1
+    
+    if reply is 0 # this means the key was NOT in the hash, so it's a new photo
+      redisClient.hset hash_key, photo.id, JSON.stringify(photo), (err, reply) -> # mark this photo id as seen
+        photo.iso_time = exports.makeISOtime photo.created_time
+        #console.log 'firing callback in tag media for new picture!', photo.id
+        callback null, photo #err, data
+    else
+      #console.log 'Dupe photo:', photo.id
+      callback err, null
+
+exports.processResultSet = (body, callback) ->
+  hash_key = "previous_instagram"
+  try 
+    body = JSON.parse body
+    objects = body.data
+    for photo in objects
+      exports.checkAndProcessPhoto photo, callback #look up one funciton for the implementation
+  catch error
+    callback error, null
+
 exports.getTagMedia = (tagName, callback) ->
-  #console.log 'getTagMedia called'
   #console.log 'getTagMedia lookup up', tagName
   requestObj = {
     url: exports.getTagMediaRequest tagName
   }
   request requestObj, (error, response, body) ->
-    #console.log error, response.statusCode, typeof response.statusCode is 200
     if response.statusCode is 200 #todo: does this need to be more robust?
-      try 
-        body = JSON.parse body
-        objects = body.data
-        #lastObject = objects.pop() #TODO! check if there's more than one new thing. 
-        #console.log lastObject, 'lastObject'
-        
-        for photo in objects
-          console.log 'igphoto:', photo
-          if photo.id not in exports.alreadySeen
-            exports.alreadySeen.push photo.id
-            photo.iso_time = exports.makeISOtime photo.created_time
-            console.log 'firing callback in tag media for new picture!'
-            callback null, photo #err, data 
-          else
-            console.log 'dupe photo. no callback.'
-            
-        exports.cleanupSeen() #keep the "seen" list to at most 50.
-          
-      catch error
-        callback error, null
-        
+      exports.processResultSet body, callback
     else 
-      #console.log "ERRORZZZ", response.statusCode
-      callback error, null #err, data
-      
-exports.alreadySeen = []
-exports.cleanupSeen = ->
-  while exports.alreadySeen.length > 50
-    exports.alreadySeen.shift()
-    
+      callback error, null # callback expects (err, data)
+
 exports.getGeoMedia = (geographyID, callback) ->
   #console.log 'getGeoMedia lookup up', geographyID
   requestObj = {
     url: exports.getGeographyMediaRequest geographyID
   }
   request requestObj, (error, response, body) -> 
-    #console.log error, response.statusCode, typeof response.statusCode is 200
-    try
-      if not error and response.statusCode is 200 #todo: does this need to be more robust? 
-        body = JSON.parse body
-        objects = body.data
-        #lastObject = objects.pop() #TODO! check if there's more than one new thing. 
-        #console.log 'lastObject', lastObject
-        
-        for photo in objects
-          if photo.id not in exports.alreadySeen
-            exports.alreadySeen.push photo.id
-            photo.iso_time = exports.makeISOtime photo.created_time
-            console.log 'firing callback in geo media for new picture!'
-            callback null, photo #err, data 
-          else
-            console.log 'dupe photo. no callback.'  
-        exports.cleanupSeen() #keep the "seen" list to at most 50.
-        
-      else 
-        callback body, null #err, data
-        
-    catch error
-      callback error, null
+    if response.statusCode is 200 # todo: does this need to be more robust?
+      exports.processResultSet body, callback
+    else 
+      callback error, null # callback expects (err, data)
   
 # seems to work! unix time (seconds, not milliseconds) passed in as STRING
 # returns STRING that is ISO8601
 exports.makeISOtime = (secs) ->
-  isoDate = new Date 1000*parseFloat(secs)
+  isoDate = new Date(1000*parseFloat(secs))
   isoDate = isoDate.toISOString()
   #console.log 'makeISOtime got', secs, 'and made', isoDate 
   return isoDate
 
 
-      
+
+
+
+# ### NOT USED, but here because it could be useful? ### #
+
 # get the current object set for each subscription 
-# returns an unsorted array of photos     
+# returns an *unsorted* array of photos     
 exports.buildInitalSet = (callback) ->    
 
   timeoutTime = ->
