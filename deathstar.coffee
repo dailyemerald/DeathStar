@@ -7,6 +7,9 @@ repl = require 'repl'
 net = require 'net'
 fs = require 'fs'
 
+#easymongo = require 'easymongo'
+#mongo = new easymongo {db: 'deathstar_cw'}
+
 redis = require 'redis'
 redisClient = redis.createClient()
 redisClient.on "error", (err) ->
@@ -66,7 +69,7 @@ getRecentItems = (num, callback) ->
     cleandata = []
     for item in dirtydata
       cleandata.push JSON.parse item
-    pushTimingStat start, gettime(), 'feedl_'+num
+    #pushTimingStat start, gettime(), 'feedl_'+num
     callback cleandata
 
 ###################
@@ -106,7 +109,10 @@ pushNewItem = (item) ->
       if err
         console.log "Redis lpush error:", err
         pushStat 'redis_lpush_error:100|c'
-      
+
+  #mongo.save 'items', item, (results) ->
+  #  console.log 'mongosave:', results  
+    
   io.sockets.emit 'newItem', strencode item # move this to redis pub/sub on another node instance?
 
   if item.type is 'instagram'
@@ -123,7 +129,7 @@ pushNewItem = (item) ->
 twitter.pullList (listIDs) ->
   console.log '+ Twitter Streaming API is rolling. List IDs:', listIDs
   setupData = {
-    track: ['goducks'],
+    track: ['goducks', 'uoasu', 'uoautzen', 'fiestabowl'],
     follow: listIDs#,
     #location: [44.053591,-123.077431,44.061663,-123.059353]
   }

@@ -12,7 +12,8 @@ twitter = new TwitterLib({
  
  
 exports.pullList = (callback) ->
-  twitter.listMembers {'slug':'football-players', 'owner_screen_name':'dailyemerald', 'cursor':'-1'}, (err, reply) ->
+  twitter.listMembers {'slug':'ducks-gameday', 'owner_screen_name':'dailyemerald', 'cursor':'-1'}, (err, reply) ->
+    console.log 'pullList reply', reply
     listIDs = []
     if err is null
       for user in reply.users
